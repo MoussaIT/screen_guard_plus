@@ -5,16 +5,16 @@ import AVFoundation
 import AVKit
 
 public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
-  // ===== Policy (مقفولة) =====
-  private let maskOnCapture: Bool = true       // دايمًا تسويد أثناء التسجيل/شاشة خارجية
-  private let muteOnCapture: Bool = true       // دايمًا كتم للصوت أثناء التسجيل
-  private var maskOnScreenshot: Bool = true    // قابل للتعديل من دارت
+  // ===== Policy (ثابتة) =====
+  private let maskOnCapture: Bool = true
+  private let muteOnCapture: Bool = true
+  private var maskOnScreenshot: Bool = true
 
   // ===== Shield Style =====
   private enum ShieldStyle: String { case blur, black }
   private var shieldStyle: ShieldStyle = .blur
 
-  // ===== Shield (window) =====
+  // ===== Shield =====
   private var shieldWindow: UIWindow?
   private var isRunning = false
 
@@ -33,27 +33,18 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
     case "start":
-      startProtect()
-      result(nil)
-
+      startProtect(); result(nil)
     case "stop":
-      stopProtect()
-      result(nil)
-
+      stopProtect(); result(nil)
     case "setPolicy":
-      if let args = call.arguments as? [String: Any] {
-        if let v = args["maskOnScreenshot"] as? Bool { maskOnScreenshot = v }
-      }
+      if let args = call.arguments as? [String: Any],
+         let v = args["maskOnScreenshot"] as? Bool { maskOnScreenshot = v }
       result(nil)
-
     case "setShieldStyle":
       if let args = call.arguments as? [String: Any],
          let s = args["style"] as? String,
-         let st = ShieldStyle(rawValue: s) {
-        setShieldStyle(st)
-      }
+         let st = ShieldStyle(rawValue: s) { setShieldStyle(st) }
       result(nil)
-
     default:
       result(FlutterMethodNotImplemented)
     }
@@ -64,17 +55,17 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
     guard !isRunning else { return }
     isRunning = true
 
-    ensureShieldReady() // جهّز الشيلد مسبقًا (Instant toggle)
+    ensureShieldReady()
 
     // تسجيل الشاشة
     NotificationCenter.default.addObserver(self, selector: #selector(capturedChanged),
       name: UIScreen.capturedDidChangeNotification, object: nil)
 
-    // لقطة الشاشة (يوصل بعد الالتقاط—نقفل بأسرع toggle)
+    // لقطة الشاشة
     NotificationCenter.default.addObserver(self, selector: #selector(userDidScreenshot),
       name: UIApplication.userDidTakeScreenshotNotification, object: nil)
 
-    // حماية Snapshot الـApp Switcher
+    // حماية Snapshot
     NotificationCenter.default.addObserver(self, selector: #selector(appWillResignActive),
       name: UIApplication.willResignActiveNotification, object: nil)
     NotificationCenter.default.addObserver(self, selector: #selector(appDidBecomeActive),
@@ -84,15 +75,17 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
     NotificationCenter.default.addObserver(self, selector: #selector(audioRouteChanged(_:)),
       name: AVAudioSession.routeChangeNotification, object: nil)
 
-    // PiP: امنعه لو حاول يبدأ
-    if #available(iOS 14.2, *) {
+    // PiP: استخدم أسماء نصّية للـnotifications لتفادي غياب الـsymbols في SDK قديم
+    if #available(iOS 14.0, *) {
+      let willStart = Notification.Name("AVPictureInPictureControllerWillStartPictureInPicture")
+      let didStart  = Notification.Name("AVPictureInPictureControllerDidStartPictureInPicture")
       NotificationCenter.default.addObserver(self, selector: #selector(stopPiPIfStarts(_:)),
-        name: AVPictureInPictureController.willStartPictureInPictureNotification, object: nil)
+        name: willStart, object: nil)
       NotificationCenter.default.addObserver(self, selector: #selector(stopPiPIfStarts(_:)),
-        name: AVPictureInPictureController.didStartPictureInPictureNotification, object: nil)
+        name: didStart, object: nil)
     }
 
-    evaluateCaptureAndReact() // حالة أولية
+    evaluateCaptureAndReact()
   }
 
   private func stopProtect() {
@@ -105,7 +98,6 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
   // MARK: - Shield build/update
   private func ensureShieldReady() {
     guard shieldWindow == nil else { return }
-
     guard let scene = UIApplication.shared.connectedScenes
       .compactMap({ $0 as? UIWindowScene })
       .first(where: { $0.activationState == .foregroundActive }) else { return }
@@ -122,13 +114,11 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
     w.backgroundColor = .clear
 
     buildShieldContent(in: w, style: shieldStyle)
-
     shieldWindow = w
   }
 
   private func buildShieldContent(in window: UIWindow, style: ShieldStyle) {
     window.subviews.forEach { $0.removeFromSuperview() }
-
     switch style {
     case .black:
       let v = UIView(frame: window.bounds)
@@ -136,7 +126,6 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
       v.isUserInteractionEnabled = false
       v.autoresizingMask = [.flexibleWidth, .flexibleHeight]
       window.addSubview(v)
-
     case .blur:
       let effect = UIBlurEffect(style: .systemUltraThinMaterialDark)
       let blurView = UIVisualEffectView(effect: effect)
@@ -158,12 +147,10 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
     shieldStyle = style
     if let w = shieldWindow {
       let wasVisible = !w.isHidden
-      CATransaction.begin()
-      CATransaction.setDisableActions(true)
+      CATransaction.begin(); CATransaction.setDisableActions(true)
       buildShieldContent(in: w, style: style)
       w.layoutIfNeeded()
       CATransaction.commit()
-      // حافظ على الحالة (مكشوف/مخفي)
       w.isHidden = !wasVisible
     }
   }
@@ -171,16 +158,14 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
   private func showShield() {
     ensureShieldReady()
     guard let w = shieldWindow else { return }
-    CATransaction.begin()
-    CATransaction.setDisableActions(true)
+    CATransaction.begin(); CATransaction.setDisableActions(true)
     w.isHidden = false
     CATransaction.commit()
   }
 
   private func hideShield() {
     guard let w = shieldWindow else { return }
-    CATransaction.begin()
-    CATransaction.setDisableActions(true)
+    CATransaction.begin(); CATransaction.setDisableActions(true)
     w.isHidden = true
     CATransaction.commit()
   }
@@ -191,16 +176,16 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
   private func isAirPlayActive() -> Bool {
     let route = AVAudioSession.sharedInstance().currentRoute
     for o in route.outputs {
-      if o.portType == .airPlay || o.portType == .hdmi || o.portType == .lineOut {
-        return true
-      }
+      // .airPlay متاح غالبًا، HDMI قد لا يكون متاحًا في SDK قديم — فحص بالنص
+      if o.portType == .airPlay { return true }
+      if o.portType.rawValue.uppercased().contains("HDMI") { return true }
+      if o.portType.rawValue.uppercased().contains("LINE") { return true }
     }
     return false
   }
 
   private func evaluateCaptureAndReact() {
     let captured = UIScreen.main.isCaptured || hasExternalDisplay() || isAirPlayActive()
-
     if captured {
       if maskOnCapture { showShield() }
       if muteOnCapture { muteIfNeeded() }
@@ -221,19 +206,14 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
     }
   }
 
-  @objc private func appWillResignActive() { showShield() } // Snapshot الـApp Switcher
-
+  @objc private func appWillResignActive() { showShield() }
   @objc private func appDidBecomeActive() { evaluateCaptureAndReact() }
-
   @objc private func audioRouteChanged(_ note: Notification) { evaluateCaptureAndReact() }
 
   @objc private func stopPiPIfStarts(_ note: Notification) {
-    if #available(iOS 14.2, *) {
-      if let pip = note.object as? AVPictureInPictureController, pip.isPictureInPictureActive {
-        pip.stopPictureInPicture()
-      }
-    }
-    showShield() // احترازيًا
+    // ما نحاولش نلمس AVPictureInPictureController هنا عشان SDK قديم ممكن يفتقده
+    // كحل عملي: بس أظهر الشيلد فورًا لتعتيم المشهد
+    showShield()
   }
 
   // MARK: - Audio mute/unmute
@@ -247,8 +227,6 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
     do {
       try session.setCategory(.playback, options: [])
       try session.setActive(true)
-      // لو عندك AVPlayer محدد، الأفضل تكتمه مباشرة: player.isMuted = true
-      // لو فيديو داخل WKWebView: تحتاج حقن JS لكتم/إيقاف <video> لو عايز ميوت مؤكد
     } catch { /* ignore */ }
   }
 
