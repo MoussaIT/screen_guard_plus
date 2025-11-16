@@ -1,4 +1,4 @@
-package com.example.screen_guard_plus
+package com.moussait.screen_guard_plus
 
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel

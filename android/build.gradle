@@ -1,4 +1,4 @@
-group = "com.example.screen_guard_plus"
+group = "com.moussait.screen_guard_plus"
 version = "1.0-SNAPSHOT"
 
 buildscript {
