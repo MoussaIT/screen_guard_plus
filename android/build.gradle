@@ -25,7 +25,7 @@ apply plugin: "com.android.library"
 apply plugin: "kotlin-android"
 
 android {
-    namespace = "com.example.screen_guard_plus"
+    namespace = "com.moussait.screen_guard_plus"
 
     compileSdk = 35
 
