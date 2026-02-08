@@ -5,7 +5,10 @@ import AVFoundation
 import AVKit
 
 public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
-  // ===== Policy (ثابتة) =====
+  
+  // MARK: - Properties
+    
+  // ===== Policy =====
   private let maskOnCapture: Bool = true
   private let muteOnCapture: Bool = true
   private var maskOnScreenshot: Bool = true
@@ -18,7 +21,7 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
   // ===== Forced Overlay =====
   private var forcedShield: Bool = false
 
-  // ===== Shield Window (للريكورد والباك جراوند) =====
+  // ===== Shield Window (Legacy: for App Switcher & Recording) =====
   private var shieldWindow: UIWindow?
   private var isRunning = false
 
@@ -37,6 +40,7 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
   private var eventsChannel: FlutterEventChannel?
   private var eventsSink: FlutterEventSink?
 
+  // MARK: - Registration
   public static func register(with registrar: FlutterPluginRegistrar) {
     let channel = FlutterMethodChannel(name: "screen_guard_plus",
                                        binaryMessenger: registrar.messenger())
@@ -48,6 +52,7 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
     instance.eventsChannel?.setStreamHandler(instance)
   }
 
+  // MARK: - Handle Methods
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
     case "start":
@@ -104,7 +109,7 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
 
     ensureShieldReady()
     
-    // تفعيل الحماية الجذرية (Fix Black Screen implemented inside)
+    // تفعيل الحماية الجذرية (Secure Field Trick)
     enableSecureMode()
 
     // Observers
@@ -144,60 +149,81 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
     hideShield()
   }
 
-  // MARK: - NEW: Secure Field Trick (Fix for Black Screen)
+  // MARK: - NEW: Secure Field Trick (Nuclear Fix)
+  // هذا التعديل يحل مشكلة التاتش ومشكلة عدم ظهور الحماية
   private func enableSecureMode() {
-      // التأكد من عدم تشغيلها مرتين
       guard secureField == nil else { return }
       
       DispatchQueue.main.async { [weak self] in
           guard let self = self else { return }
-          guard let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow }),
-                let rootVC = window.rootViewController,
-                let fView = rootVC.view else { return }
+          guard let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow }) ?? UIApplication.shared.delegate?.window as? UIWindow else { return }
+          guard let rootVC = window.rootViewController, let fView = rootVC.view else { return }
           
           self.originalWindow = window
           self.flutterView = fView
           
-          // 1. إنشاء الحقل وتجهيزه
+          // 1. إنشاء الحقل
           let field = UITextField()
           field.isSecureTextEntry = true
-          field.backgroundColor = .clear
-          field.isUserInteractionEnabled = false // عشان التاتش يعدي للي وراه
           
-          // استخدام Frame بدلاً من Constraints لحل مشكلة الشاشة السوداء
+          // هام جداً: تفعيل التفاعل عشان التاتش يوصل للي تحته
+          field.isUserInteractionEnabled = true
+          
+          field.backgroundColor = .clear
           field.frame = window.bounds
           field.autoresizingMask = [.flexibleWidth, .flexibleHeight]
           
+          // إضافته للنافذة
           window.addSubview(field)
+          window.sendSubviewToBack(field) // نحطه ورا مؤقتاً عشان الترتيب
           
           // Force Layout عشان الطبقات تتكون
           field.layoutIfNeeded()
           
-          // 2. محاولة الوصول للـ Secure Container (الطبقة المخفية)
-          guard let secureContainer = field.layer.sublayers?.first?.delegate as? UIView else {
-              // لو فشل، نحذف الحقل ونخرج عشان التطبيق ميبوظش
+          // 2. البحث عن الكونتينر الصحيح (Loop Fix)
+          var secureContainer: UIView?
+          
+          // بنلف في الطبقات لحد ما نلاقي الطبقة اللي بتقبل تكون Container
+          if let layers = field.layer.sublayers {
+              for layer in layers {
+                  if let view = layer.delegate as? UIView {
+                      secureContainer = view
+                      break 
+                  }
+              }
+          }
+          
+          // Fallback لو ملقيناش الطبقة بالطريقة الأولى
+          if secureContainer == nil {
+              secureContainer = field.subviews.first
+          }
+          
+          guard let finalContainer = secureContainer else {
               field.removeFromSuperview()
+              print("ScreenGuardPlus: Failed to resolve secure container")
               return
           }
           
-          // التأكد من حجم الكونتينر
-          secureContainer.frame = window.bounds
-          secureContainer.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-          secureContainer.isUserInteractionEnabled = true
+          // 3. ضبط الكونتينر
+          finalContainer.frame = window.bounds
+          finalContainer.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+          finalContainer.isUserInteractionEnabled = true // هام جداً
           
-          // 3. نقل عرض فلاتر للداخل
+          // 4. عملية النقل (Swapping)
           fView.removeFromSuperview()
-          secureContainer.addSubview(fView)
+          finalContainer.addSubview(fView)
           
-          // ضبط حجم الفلاتر فيو
-          fView.frame = secureContainer.bounds
+          // ضبط الفلاتر فيو
+          fView.frame = finalContainer.bounds
           fView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-          fView.isUserInteractionEnabled = true
           
           self.secureField = field
           
           // تنشيط التغييرات
           window.layoutIfNeeded()
+          
+          // خدعة إضافية: نتأكد إن الفلاتر هو الفوكاس للتاتش
+          rootVC.view.becomeFirstResponder()
       }
   }
 
@@ -208,18 +234,15 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
                 let window = self.originalWindow,
                 let fView = self.flutterView else { return }
           
-          // إرجاع الفيو للنافذة الرئيسية
+          // 1. إرجاع الفلاتر فيو لمكانه الأصلي
           fView.removeFromSuperview()
           window.addSubview(fView)
+          window.rootViewController?.view = fView // تأكيد الربط
           
-          // إعادة ضبط الحجم
           fView.frame = window.bounds
           fView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
           
-          // التأكد من وضعه كـ Root
-          window.rootViewController?.view = fView
-          
-          // حذف الحقل الآمن
+          // 2. حذف الحقل الآمن
           field.removeFromSuperview()
           self.secureField = nil
       }
@@ -231,7 +254,7 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
       
       DispatchQueue.main.async { [weak self] in
           guard let self = self else { return }
-          // المحاولة للوصول للفيو سواء كان محمي أو عادي
+          // بنضيف الووتر مارك على الفلاتر فيو نفسه عشان يبقى محمي زيه
           guard let fView = self.flutterView ?? UIApplication.shared.windows.first(where: { $0.isKeyWindow })?.rootViewController?.view else { return }
           
           let label = UILabel()
@@ -267,7 +290,7 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
       }
   }
 
-  // MARK: - Legacy Shield (Background & Recording)
+  // MARK: - Legacy Shield (Legacy Logic Preserved)
   private func ensureShieldReady() {
     guard shieldWindow == nil else { return }
     guard let scene = UIApplication.shared.connectedScenes
