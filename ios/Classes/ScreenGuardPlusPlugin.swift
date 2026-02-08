@@ -12,9 +12,7 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
 
   // ===== Shield Style =====
   private enum ShieldStyle: String { case blur, black }
-  /// الستايل الافتراضي لما "مفيش تسجيل"
   private var defaultShieldStyle: ShieldStyle = .blur
-  /// الستايل الحالي المعروض فعليًا
   private var currentVisibleStyle: ShieldStyle?
 
   // ===== Forced Overlay (لأوضاع صارمة) =====
@@ -28,6 +26,12 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
   private var lastAudioCategory: AVAudioSession.Category?
   private var lastAudioOptions: AVAudioSession.CategoryOptions = []
   private var lastAudioMode: AVAudioSession.Mode?
+
+  // ===== NEW: Secure & Watermark Variables =====
+  private var secureField: UITextField?
+  private weak var originalWindow: UIWindow?
+  private weak var flutterView: UIView?
+  private var watermarkLabel: UILabel?
 
   // (اختياري) قناة أحداث لو محتاج
   private var eventsChannel: FlutterEventChannel?
@@ -48,10 +52,12 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
     case "start":
-      startProtect(); result(nil)
+      startProtect()
+      result(nil)
 
     case "stop":
-      stopProtect(); result(nil)
+      stopProtect()
+      result(nil)
 
     case "setPolicy":
       if let args = call.arguments as? [String: Any],
@@ -70,8 +76,22 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
       if let args = call.arguments as? [String: Any],
          let on = args["on"] as? Bool {
         forcedShield = on
-        evaluateCaptureAndReact() // يقرر Black لو Recording أو default otherwise
+        evaluateCaptureAndReact()
       }
+      result(nil)
+        
+    // ===== NEW: Watermark Methods =====
+    case "addWatermark":
+      if let args = call.arguments as? [String: Any],
+         let text = args["text"] as? String,
+         let colorHex = args["color"] as? String {
+          let size = args["size"] as? CGFloat ?? 45.0
+          addWatermark(text: text, hexColor: colorHex, fontSize: size)
+      }
+      result(nil)
+        
+    case "removeWatermark":
+      removeWatermark()
       result(nil)
 
     default:
@@ -85,6 +105,9 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
     isRunning = true
 
     ensureShieldReady()
+    
+    // تفعيل الحماية الجذرية (الاسكرين شوت الأسود)
+    enableSecureMode()
 
     // تسجيل الشاشة (عند تغيّر الحالة)
     NotificationCenter.default.addObserver(self, selector: #selector(capturedChanged),
@@ -120,11 +143,137 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
   private func stopProtect() {
     isRunning = false
     NotificationCenter.default.removeObserver(self)
+    
+    disableSecureMode()
+    removeWatermark()
     unmuteIfNeeded()
     hideShield()
   }
 
-  // MARK: - Shield build/update
+  // MARK: - NEW: Secure Field Trick (Screenshot Blocker)
+  private func enableSecureMode() {
+      // التأكد من عدم تشغيلها مرتين
+      guard secureField == nil else { return }
+      
+      DispatchQueue.main.async { [weak self] in
+          guard let self = self else { return }
+          guard let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow }),
+                let rootVC = window.rootViewController,
+                let fView = rootVC.view else { return }
+          
+          self.originalWindow = window
+          self.flutterView = fView
+          
+          // 1. إنشاء الحقل المخفي
+          let field = UITextField()
+          field.isSecureTextEntry = true
+          field.backgroundColor = .clear
+          field.isUserInteractionEnabled = false // لضمان مرور التاتش
+          
+          window.addSubview(field)
+          field.translatesAutoresizingMaskIntoConstraints = false
+          NSLayoutConstraint.activate([
+              field.topAnchor.constraint(equalTo: window.topAnchor),
+              field.bottomAnchor.constraint(equalTo: window.bottomAnchor),
+              field.leadingAnchor.constraint(equalTo: window.leadingAnchor),
+              field.trailingAnchor.constraint(equalTo: window.trailingAnchor)
+          ])
+          
+          // 2. الحصول على الطبقة الآمنة (Secure Container)
+          guard let secureContainer = field.layer.sublayers?.first?.delegate as? UIView else {
+              field.removeFromSuperview()
+              return
+          }
+          
+          // 3. نقل عرض فلاتر للداخل
+          fView.removeFromSuperview()
+          secureContainer.addSubview(fView)
+          
+          fView.translatesAutoresizingMaskIntoConstraints = false
+          NSLayoutConstraint.activate([
+              fView.topAnchor.constraint(equalTo: secureContainer.topAnchor),
+              fView.bottomAnchor.constraint(equalTo: secureContainer.bottomAnchor),
+              fView.leadingAnchor.constraint(equalTo: secureContainer.leadingAnchor),
+              fView.trailingAnchor.constraint(equalTo: secureContainer.trailingAnchor)
+          ])
+          
+          secureContainer.isUserInteractionEnabled = true
+          fView.isUserInteractionEnabled = true
+          
+          self.secureField = field
+      }
+  }
+
+  private func disableSecureMode() {
+      DispatchQueue.main.async { [weak self] in
+          guard let self = self,
+                let field = self.secureField,
+                let window = self.originalWindow,
+                let fView = self.flutterView else { return }
+          
+          // إرجاع الفيو للنافذة الرئيسية
+          fView.removeFromSuperview()
+          window.addSubview(fView)
+          
+          fView.translatesAutoresizingMaskIntoConstraints = false
+          NSLayoutConstraint.activate([
+              fView.topAnchor.constraint(equalTo: window.topAnchor),
+              fView.bottomAnchor.constraint(equalTo: window.bottomAnchor),
+              fView.leadingAnchor.constraint(equalTo: window.leadingAnchor),
+              fView.trailingAnchor.constraint(equalTo: window.trailingAnchor)
+          ])
+          
+          window.rootViewController?.view = fView
+          field.removeFromSuperview()
+          self.secureField = nil
+      }
+  }
+
+  // MARK: - NEW: Watermark Logic
+  private func addWatermark(text: String, hexColor: String, fontSize: CGFloat) {
+      removeWatermark() // تنظيف لو فيه ووترمارك قديمة
+      
+      DispatchQueue.main.async { [weak self] in
+          guard let self = self else { return }
+          // نجيب الـ Flutter View سواء كنا في الوضع الآمن أو العادي
+          guard let fView = self.flutterView ?? UIApplication.shared.windows.first(where: { $0.isKeyWindow })?.rootViewController?.view else { return }
+          
+          let label = UILabel()
+          label.text = text
+          label.textColor = UIColor(hex: hexColor)
+          label.font = UIFont.boldSystemFont(ofSize: fontSize)
+          label.alpha = 0.4 // الشفافية 0.4 حسب طلبك
+          label.textAlignment = .center
+          label.numberOfLines = 0
+          
+          // التدوير
+          label.transform = CGAffineTransform(rotationAngle: -CGFloat.pi / 4)
+          label.isUserInteractionEnabled = false // عشان التاتش يعدي للمحتوى
+          
+          fView.addSubview(label)
+          fView.bringSubviewToFront(label)
+          
+          label.translatesAutoresizingMaskIntoConstraints = false
+          NSLayoutConstraint.activate([
+              label.centerXAnchor.constraint(equalTo: fView.centerXAnchor),
+              label.centerYAnchor.constraint(equalTo: fView.centerYAnchor),
+              // بنكبر العرض والارتفاع عشان لما نلفها تغطي نص الشاشة زي ما طلبت
+              label.widthAnchor.constraint(equalTo: fView.widthAnchor, multiplier: 1.5),
+              label.heightAnchor.constraint(equalTo: fView.heightAnchor, multiplier: 0.5)
+          ])
+          
+          self.watermarkLabel = label
+      }
+  }
+
+  private func removeWatermark() {
+      DispatchQueue.main.async { [weak self] in
+          self?.watermarkLabel?.removeFromSuperview()
+          self?.watermarkLabel = nil
+      }
+  }
+
+  // MARK: - Shield build/update (القديم بتاعك كما هو)
   private func ensureShieldReady() {
     guard shieldWindow == nil else { return }
     guard let scene = UIApplication.shared.connectedScenes
@@ -142,7 +291,6 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
     w.isUserInteractionEnabled = false
     w.backgroundColor = .clear
 
-    // ابنِ بالمبدئي (مش هيبان إلا عند showShield)
     buildShieldContent(in: w, style: defaultShieldStyle)
     shieldWindow = w
     currentVisibleStyle = defaultShieldStyle
@@ -176,14 +324,11 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
     currentVisibleStyle = style
   }
 
-  /// غيّر الستايل الافتراضي (يستخدم فقط لما مفيش تسجيل/إخراجات/لقطة شاشة)
   private func setDefaultShieldStyle(_ style: ShieldStyle) {
     defaultShieldStyle = style
-    // لو الشيلد ظاهر بأسلوب آخر بسبب تسجيل/لقطة، نسيبه كما هو.
     if let w = shieldWindow, !w.isHidden, currentVisibleStyle != style {
       return
     }
-    // لو مخفي، حضّر المحتوى بالستايل الجديد
     if let w = shieldWindow, w.isHidden {
       CATransaction.begin(); CATransaction.setDisableActions(true)
       buildShieldContent(in: w, style: style)
@@ -192,7 +337,6 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
     }
   }
 
-  /// إظهار الشيلد بستایل معين (مع إعادة بناء المحتوى لو مختلف)
   private func showShield(as style: ShieldStyle) {
     ensureShieldReady()
     guard let w = shieldWindow else { return }
@@ -211,7 +355,6 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
   private func showShield() { showShield(as: defaultShieldStyle) }
 
   private func hideShield() {
-    // لو مجبَر (forceShield)، ما نخبّيش الشيلد
     guard !forcedShield else { return }
     guard let w = shieldWindow else { return }
     CATransaction.begin(); CATransaction.setDisableActions(true)
@@ -225,7 +368,6 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
   private func isAirPlayActive() -> Bool {
     let route = AVAudioSession.sharedInstance().currentRoute
     for o in route.outputs {
-      // .airPlay غالبًا متاح، HDMI/LINE قد تغيب في SDK قديم — فحص بالنص
       if o.portType == .airPlay { return true }
       if o.portType.rawValue.uppercased().contains("HDMI") { return true }
       if o.portType.rawValue.uppercased().contains("LINE") { return true }
@@ -233,15 +375,12 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
     return false
   }
 
-  /// الحالة العامة / واحترام forceShield:
-  /// - لو forcedShield=true: نُظهر الشيلد دائمًا (Black لو في تسجيل، وإلا default).
-  /// - لو false: نظهر الشيلد فقط عند التسجيل/الإخراجات، ونخفيه غير ذلك.
   private func evaluateCaptureAndReact() {
     let captured = UIScreen.main.isCaptured || hasExternalDisplay() || isAirPlayActive()
 
     if forcedShield {
       if captured {
-        showShield(as: .black)        // تسجيل/إخراجات ⇒ أسود
+        showShield(as: .black)
         if muteOnCapture { muteIfNeeded() }
       } else {
         unmuteIfNeeded()
@@ -250,9 +389,8 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
       return
     }
 
-    // الوضع العادي
     if captured {
-      if maskOnCapture { showShield(as: .black) }  // تسجيل/إخراجات ⇒ أسود
+      if maskOnCapture { showShield(as: .black) }
       if muteOnCapture { muteIfNeeded() }
     } else {
       unmuteIfNeeded()
@@ -263,22 +401,19 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
   // MARK: - Notifications
   @objc private func capturedChanged() {
     evaluateCaptureAndReact()
-    // (اختياري) eventsSink?("recording_" + (UIScreen.main.isCaptured ? "start" : "stop"))
   }
 
   @objc private func userDidScreenshot() {
     guard maskOnScreenshot else { return }
-    // لقطة الشاشة: اعرض Blur لحظيًّا
+    // الاسكرين شوت كده كده هتبقى سودة بسبب الـ SecureMode
+    // بس ده بيعمل Blur للمستخدم لمدة ثانية كنوع من التنبيه
     showShield(as: .blur)
-    // ثم ارجع للوضع المناسب بعد 1 ثانية
     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
       self?.evaluateCaptureAndReact()
     }
-    // (اختياري) eventsSink?("screenshot")
   }
 
   @objc private func appWillResignActive() {
-    // Snapshot الـApp Switcher: استخدم الافتراضي (blur أو black حسب اختيارك)
     showShield(as: defaultShieldStyle)
   }
 
@@ -287,8 +422,7 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
   @objc private func audioRouteChanged(_ note: Notification) { evaluateCaptureAndReact() }
 
   @objc private func stopPiPIfStarts(_ note: Notification) {
-    // SDKs قديمة قد تفتقد PiP symbols — نغطي مباشرة
-    showShield(as: .black)  // احترازيًا خليها أسود مع أي محاولة PiP
+    showShield(as: .black)
   }
 
   // MARK: - Audio mute/unmute
@@ -318,7 +452,7 @@ public class ScreenGuardPlusPlugin: NSObject, FlutterPlugin {
   }
 }
 
-// (اختياري) دعم قناة الأحداث
+// MARK: - Streams
 extension ScreenGuardPlusPlugin: FlutterStreamHandler {
   public func onListen(withArguments args: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
     eventsSink = events; return nil
@@ -326,4 +460,21 @@ extension ScreenGuardPlusPlugin: FlutterStreamHandler {
   public func onCancel(withArguments args: Any?) -> FlutterError? {
     eventsSink = nil; return nil
   }
+}
+
+// MARK: - Helpers (Hex Color)
+extension UIColor {
+    convenience init(hex: String) {
+        var hexSanitized = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        hexSanitized = hexSanitized.replacingOccurrences(of: "#", with: "")
+
+        var rgb: UInt64 = 0
+        Scanner(string: hexSanitized).scanHexInt64(&rgb)
+
+        let r = CGFloat((rgb & 0xFF0000) >> 16) / 255.0
+        let g = CGFloat((rgb & 0x00FF00) >> 8) / 255.0
+        let b = CGFloat(rgb & 0x0000FF) / 255.0
+
+        self.init(red: r, green: g, blue: b, alpha: 1.0)
+    }
 }

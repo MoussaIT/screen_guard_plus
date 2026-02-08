@@ -1,26 +1,53 @@
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
-
 import 'screen_guard_plus_method_channel.dart';
 
 abstract class ScreenGuardPlusPlatform extends PlatformInterface {
-  /// Constructs a ScreenGuardPlusPlatform.
   ScreenGuardPlusPlatform() : super(token: _token);
 
   static final Object _token = Object();
 
   static ScreenGuardPlusPlatform _instance = MethodChannelScreenGuardPlus();
 
-  /// The default instance of [ScreenGuardPlusPlatform] to use.
-  ///
-  /// Defaults to [MethodChannelScreenGuardPlus].
   static ScreenGuardPlusPlatform get instance => _instance;
 
-  /// Platform-specific implementations should set this with their own
-  /// platform-specific class that extends [ScreenGuardPlusPlatform] when
-  /// they register themselves.
   static set instance(ScreenGuardPlusPlatform instance) {
     PlatformInterface.verifyToken(instance, _token);
     _instance = instance;
+  }
+
+  // === Core ===
+  Future<void> start() {
+    throw UnimplementedError('start() has not been implemented.');
+  }
+
+  Future<void> stop() {
+    throw UnimplementedError('stop() has not been implemented.');
+  }
+
+  // === Watermark ===
+  Future<void> addWatermark({
+    required String text,
+    required String hexColor,
+    double size = 45.0,
+  }) {
+    throw UnimplementedError('addWatermark() has not been implemented.');
+  }
+
+  Future<void> removeWatermark() {
+    throw UnimplementedError('removeWatermark() has not been implemented.');
+  }
+
+  // === iOS Specific ===
+  Future<void> setShieldStyle(String styleName) {
+    throw UnimplementedError('setShieldStyle() has not been implemented.');
+  }
+
+  Future<void> allowScreenshots(bool allow) {
+    throw UnimplementedError('allowScreenshots() has not been implemented.');
+  }
+
+  Future<void> forceShield(bool on) {
+    throw UnimplementedError('forceShield() has not been implemented.');
   }
 
   Future<String?> getPlatformVersion() {
