@@ -9,17 +9,15 @@ enum ShieldStyle { blur, black }
 
 class ScreenGuardPlus {
   
-  // دالة مساعدة عشان نختصر الشروط
-  // بترجع true لو المنصة مدعومة (Android أو iOS فقط)
+  // تحقق من المنصة لمنع الـ Crash على غير الموبايل
   static bool get _isMobilePlatform {
-    if (kIsWeb) return false; // الويب مش مدعوم
+    if (kIsWeb) return false;
     return Platform.isAndroid || Platform.isIOS;
   }
 
   // === Common Methods ===
-  
   static Future<void> start() async {
-    if (!_isMobilePlatform) return; // لو ويندوز أو غيره، اخرج بهدوء
+    if (!_isMobilePlatform) return;
     await ScreenGuardPlusPlatform.instance.start();
   }
 
@@ -54,9 +52,7 @@ class ScreenGuardPlus {
   }
 
   // === iOS Only Methods ===
-
   static Future<void> setShieldStyle(ShieldStyle style) async {
-    // هنا الشرط أصلاً موجود (isIOS) فمش محتاجين نعدله
     if (kIsWeb || !Platform.isIOS) return;
     await ScreenGuardPlusPlatform.instance.setShieldStyle(style.name);
   }
