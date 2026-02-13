@@ -5,9 +5,7 @@ abstract class ScreenGuardPlusPlatform extends PlatformInterface {
   ScreenGuardPlusPlatform() : super(token: _token);
 
   static final Object _token = Object();
-
   static ScreenGuardPlusPlatform _instance = MethodChannelScreenGuardPlus();
-
   static ScreenGuardPlusPlatform get instance => _instance;
 
   static set instance(ScreenGuardPlusPlatform instance) {
@@ -24,26 +22,9 @@ abstract class ScreenGuardPlusPlatform extends PlatformInterface {
     throw UnimplementedError('stop() has not been implemented.');
   }
 
-  // === Watermark ===
-  Future<void> addWatermark({
-    required String text,
-    required String hexColor,
-    double size = 45.0,
-  }) {
-    throw UnimplementedError('addWatermark() has not been implemented.');
-  }
-
-  Future<void> removeWatermark() {
-    throw UnimplementedError('removeWatermark() has not been implemented.');
-  }
-
   // === iOS Specific ===
   Future<void> setShieldStyle(String styleName) {
     throw UnimplementedError('setShieldStyle() has not been implemented.');
-  }
-
-  Future<void> allowScreenshots(bool allow) {
-    throw UnimplementedError('allowScreenshots() has not been implemented.');
   }
 
   Future<void> forceShield(bool on) {
